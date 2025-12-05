@@ -1,1 +1,610 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Night Sky Shooter</title>
+    <style>
 
+        body {
+            margin: 0;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            height: 100vh;
+            color: white;
+            font-family: 'Consolas', monospace; 
+        }
+
+        canvas {
+            background: #000022; 
+            border: 5px solid #1A237E; 
+            box-shadow: 0 0 20px rgba(70, 130, 180, 0.5); 
+            display: block;
+            cursor: none;
+        }
+
+        .message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 40px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 3px solid #FFD700;
+            color: #FFD700;
+            font-size: 2.5rem;
+            font-weight: bold;
+            text-align: center;
+            border-radius: 10px;
+            box-shadow: 0 0 30px #FFD700;
+            z-index: 10;
+            display: none; 
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .message-box:hover {
+            background: rgba(20, 20, 20, 0.95);
+        }
+    
+        .message-box.won {
+            border-color: #00dffc; 
+            color: #00dffc;
+            box-shadow: 0 0 30px #00dffc;
+        }
+
+        .message-box.gameover {
+            border-color: #ff4444;
+            color: #ff4444;
+            box-shadow: 0 0 30px #ff4444;
+        }
+
+        .game-over-stats {
+            font-size: 1.2rem;
+            margin-top: 20px;
+            line-height: 1.8;
+        }
+
+        .game-over-stats div {
+            margin: 10px 0;
+        }
+
+        .restart-hint {
+            font-size: 1rem;
+            color: #aaa;
+            margin-top: 20px;
+            animation: blink 1.5s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50%, 100% { opacity: 1; }
+            25%, 75% { opacity: 0.3; }
+        }
+
+        .hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 10px;
+            border: 2px solid #1A237E;
+            min-width: 200px;
+        }
+
+        .hud-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            font-size: 18px;
+        }
+
+        .hud-label {
+            color: #888;
+        }
+
+        .hud-value {
+            color: #FFD700;
+            font-weight: bold;
+        }
+
+        .hud-value.warning {
+            color: #ff4444;
+            animation: pulse 0.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .combo-popup {
+            position: absolute;
+            font-size: 2rem;
+            font-weight: bold;
+            color: #00ff00;
+            text-shadow: 0 0 10px #00ff00;
+            pointer-events: none;
+            animation: comboFloat 1s ease-out forwards;
+        }
+
+        @keyframes comboFloat {
+            0% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(-50px) scale(1.5);
+            }
+        }
+
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="1024" height="768"></canvas>
+    
+    <div class="hud" id="hud">
+        <div class="hud-item">
+            <span class="hud-label">LEVEL:</span>
+            <span class="hud-value" id="hudLevel">1</span>
+        </div>
+        <div class="hud-item">
+            <span class="hud-label">SKOR:</span>
+            <span class="hud-value" id="hudScore">0</span>
+        </div>
+        <div class="hud-item">
+            <span class="hud-label">TARGET:</span>
+            <span class="hud-value" id="hudTarget">10</span>
+        </div>
+        <div class="hud-item">
+            <span class="hud-label">WAKTU:</span>
+            <span class="hud-value" id="hudTime">00:00</span>
+        </div>
+        <div class="hud-item">
+            <span class="hud-label">SISA:</span>
+            <span class="hud-value" id="hudRemaining">60s</span>
+        </div>
+        <div class="hud-item">
+            <span class="hud-label">COMBO:</span>
+            <span class="hud-value" id="hudCombo">x1</span>
+        </div>
+    </div>
+    
+    <div id="messageBox" class="message-box"></div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const messageBox = document.getElementById("messageBox");
+
+        const SCORE_TO_WIN_LEVEL = 10;
+        const TIME_LIMIT_PER_LEVEL = 60; 
+        
+        let score = 0;
+        let totalScore = 0;
+        let level = 1; 
+        let gameState = 'ready'; 
+        let animationFrameId; 
+        let combo = 1;
+        let comboTimer = null;
+        
+        let startTime = 0; 
+        let elapsedTime = 0;
+        let totalPlayTime = 0;
+        let levelStartTime = 0;
+
+        const stars = [];
+        const starCount = 300; 
+        
+        const moon = {
+            x: 80, 
+            y: 80,
+            radius: 45,
+            color: '#B0C4DE',
+            shadowColor: 'rgba(176, 196, 222, 0.8)',
+            shadowBlur: 30
+        };
+
+        function createStars() {
+            for (let i = 0; i < starCount; i++) {
+                stars.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    radius: Math.random() * 1.5 + 0.5,
+                    brightness: Math.random() * 0.5 + 0.5
+                });
+            }
+        }
+
+        const player = {
+            x: 100,
+            y: canvas.height / 2,
+            targetY: canvas.height / 2,
+            size: 40,
+            speed: 7
+        };
+
+        const enemy1 = {
+            x: 900, y: canvas.height / 2, size: 50, dy: 3, color: "purple", baseSpeed: 3
+        };
+        
+        const enemy2 = {
+            x: 850, y: canvas.height / 4, size: 40, dy: -4, color: "lime", baseSpeed: 4
+        };
+        
+        const enemy3 = {
+            x: 950, y: canvas.height * 0.2, size: 45, dy: -1.5, color: "gold", baseSpeed: 1.5
+        };
+        
+        const allEnemies = [enemy1, enemy2, enemy3];
+
+        const bullets = [];
+        const keys = {};
+
+        function updateHUD() {
+            document.getElementById('hudLevel').textContent = level;
+            document.getElementById('hudScore').textContent = score;
+            document.getElementById('hudTarget').textContent = SCORE_TO_WIN_LEVEL;
+            
+            const minutes = Math.floor(totalPlayTime / 60);
+            const seconds = Math.floor(totalPlayTime % 60);
+            document.getElementById('hudTime').textContent = 
+                `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            
+            const remainingTime = Math.max(0, TIME_LIMIT_PER_LEVEL - elapsedTime);
+            const remainingElement = document.getElementById('hudRemaining');
+            remainingElement.textContent = `${remainingTime}s`;
+            
+            if (remainingTime <= 10 && gameState === 'playing') {
+                remainingElement.classList.add('warning');
+            } else {
+                remainingElement.classList.remove('warning');
+            }
+
+            document.getElementById('hudCombo').textContent = `x${combo}`;
+        }
+
+        function showComboPopup(x, y, points) {
+            const popup = document.createElement('div');
+            popup.className = 'combo-popup';
+            popup.textContent = `+${points}`;
+            popup.style.left = x + 'px';
+            popup.style.top = y + 'px';
+            document.body.appendChild(popup);
+            
+            setTimeout(() => popup.remove(), 1000);
+        }
+
+        function increaseCombo() {
+            combo = Math.min(combo + 1, 10);
+            
+            if (comboTimer) clearTimeout(comboTimer);
+            comboTimer = setTimeout(() => {
+                combo = 1;
+                updateHUD();
+            }, 2000);
+        }
+
+        function drawStars() {
+            stars.forEach(star => {
+                ctx.beginPath();
+                const alpha = star.brightness * (0.8 + Math.sin(Date.now() / 500) * 0.2); 
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+        
+        function drawMoon() {
+            ctx.beginPath();
+            ctx.shadowColor = moon.shadowColor;
+            ctx.shadowBlur = moon.shadowBlur;
+            ctx.fillStyle = moon.color;
+            ctx.arc(moon.x, moon.y, moon.radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.shadowBlur = 0; 
+        }
+
+        function drawPlayer() {
+            ctx.fillStyle = "skyblue";
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y);
+            ctx.lineTo(player.x - player.size, player.y + player.size / 1.5);
+            ctx.lineTo(player.x - player.size, player.y - player.size / 1.5);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function drawEnemy(e) {
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
+            ctx.fillStyle = e.color; 
+            ctx.fill();
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        function drawBullets() {
+            ctx.fillStyle = "red"; 
+            bullets.forEach(bullet => {
+                ctx.beginPath();
+                ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function resetEnemy(e, initialX, initialY, initialSize, initialDY) {
+            e.x = initialX;
+            e.y = initialY;
+            e.size = initialSize;
+            e.dy = (initialDY > 0 ? 1 : -1) * e.baseSpeed; 
+        }
+
+        function resetEnemyPositions() {
+            resetEnemy(enemy1, 900, canvas.height / 2, 50, enemy1.baseSpeed);
+            resetEnemy(enemy2, 850, canvas.height / 4, 40, -enemy2.baseSpeed);
+            resetEnemy(enemy3, 950, canvas.height * 0.2, 45, -enemy3.baseSpeed);
+        }
+
+        canvas.addEventListener('mousemove', e => {
+            if (gameState === 'playing') {
+                const rect = canvas.getBoundingClientRect();
+                const mouseY = e.clientY - rect.top;
+                
+                player.targetY = Math.min(canvas.height - player.size / 2, Math.max(player.size / 2, mouseY));
+            }
+        });
+
+        document.addEventListener("keydown", e => {
+            if (gameState !== 'playing') return;
+
+            if (e.code === "Space") {
+                e.preventDefault();
+            }
+
+            keys[e.code] = true;
+
+            if (e.code === "Space" && !e.repeat) {
+                bullets.push({
+                    x: player.x + 10,
+                    y: player.y,
+                    radius: 8,
+                    speed: 15
+                });
+            }
+        });
+
+        document.addEventListener("keyup", e => {
+            keys[e.code] = false;
+        });
+
+        function movePlayer() {
+            const dy = player.targetY - player.y;
+            player.y += Math.min(Math.abs(dy), player.speed) * Math.sign(dy);
+
+            player.x = 100; 
+
+            const halfSize = player.size / 2;
+            player.y = Math.min(canvas.height - halfSize, Math.max(halfSize, player.y));
+        }
+        
+        function moveEnemies() {
+            allEnemies.forEach(e => {
+                e.y += e.dy;
+
+                if (e.y + e.size > canvas.height || e.y - e.size < 0) {
+                    e.dy *= -1; 
+                }
+            });
+        }
+
+        function updateBullets() {
+            for (let i = 0; i < bullets.length; i++) {
+                bullets[i].x += bullets[i].speed;
+
+                if (bullets[i].x > canvas.width) {
+                    bullets.splice(i, 1);
+                    i--;
+                    continue;
+                }
+
+                let bulletHit = false;
+
+                for (let j = 0; j < allEnemies.length; j++) {
+                    const e = allEnemies[j];
+                    
+                    const dx = bullets[i].x - e.x;
+                    const dy = bullets[i].y - e.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const collisionThreshold = e.size + bullets[i].radius; 
+
+                    if (distance < collisionThreshold) {
+                        const points = 1 * combo;
+                        score += points;
+                        totalScore += points;
+                        
+                        const rect = canvas.getBoundingClientRect();
+                        showComboPopup(rect.left + e.x, rect.top + e.y, points);
+                        
+                        increaseCombo();
+                        updateHUD();
+                        
+                        e.x = (canvas.width / 2) + 100 + (Math.random() * (canvas.width / 2 - 150)); 
+                        e.y = Math.random() * (canvas.height - e.size * 2) + e.size; 
+                        e.size = Math.min(120, e.size + 3); 
+                        
+                        const speedIncrease = e.baseSpeed + level * 0.15;
+                        e.dy = (e.dy > 0 ? 1 : -1) * speedIncrease; 
+                        
+                        bulletHit = true;
+                        break; 
+                    }
+                }
+                
+                if (bulletHit) {
+                    bullets.splice(i, 1);
+                    i--;
+                }
+            }
+        }
+        
+        function checkGameOverAndLevelUp() {
+            if (score >= SCORE_TO_WIN_LEVEL) {
+                level++;
+                score = 0;
+                combo = 1;
+                levelStartTime = Date.now();
+                elapsedTime = 0;
+                
+                resetEnemyPositions();
+
+                showMessage(`🎉 LEVEL ${level - 1} SELESAI! 🎉<div style="font-size: 1.5rem; margin-top: 15px;">Melanjutkan ke Level ${level}...</div>`);
+                
+                gameState = 'leveling';
+                cancelAnimationFrame(animationFrameId);
+                
+                setTimeout(() => {
+                    if (gameState === 'leveling') {
+                        messageBox.style.display = 'none';
+                        gameState = 'playing';
+                        gameLoop(); 
+                    }
+                }, 2000); 
+
+                return; 
+            }
+
+            if (elapsedTime >= TIME_LIMIT_PER_LEVEL) {
+                showGameOver('WAKTU HABIS!');
+                return;
+            }
+
+            for (let j = 0; j < allEnemies.length; j++) {
+                const e = allEnemies[j];
+                
+                const dx = (player.x - player.size / 2) - e.x;
+                const dy = player.y - e.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                const collisionThreshold = e.size + player.size * 0.7;
+
+                if (distance < collisionThreshold) {
+                    showGameOver('TERTABRAK MUSUH!');
+                    break;
+                }
+            }
+        }
+
+        function showGameOver(reason) {
+            gameState = 'gameover';
+            cancelAnimationFrame(animationFrameId);
+            
+            const minutes = Math.floor(totalPlayTime / 60);
+            const seconds = Math.floor(totalPlayTime % 60);
+            const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            
+            messageBox.classList.remove('won');
+            messageBox.classList.add('gameover');
+            
+            let performance = '';
+            if (level >= 5) performance = '🏆 MASTER SHOOTER!';
+            else if (level >= 3) performance = '⭐ HEBAT!';
+            else if (level >= 2) performance = '👍 BAGUS!';
+            else performance = '💪 COBA LAGI!';
+            
+            showMessage(`
+                🎮 GAME OVER! 🎮
+                <div style="font-size: 1.5rem; margin: 15px 0;">${reason}</div>
+                <div class="game-over-stats">
+                    <div>📊 SKOR AKHIR: ${totalScore}</div>
+                    <div>🎯 LEVEL TERCAPAI: ${level}</div>
+                    <div>⏱️ WAKTU BERMAIN: ${timeString}</div>
+                    <div style="margin-top: 15px; color: #FFD700;">${performance}</div>
+                </div>
+                <div class="restart-hint">Klik untuk Main Lagi</div>
+            `);
+        }
+        
+        function resetGame() {
+            score = 0;
+            totalScore = 0;
+            level = 1;
+            combo = 1;
+            bullets.length = 0;
+
+            startTime = Date.now();
+            levelStartTime = Date.now();
+            elapsedTime = 0;
+            totalPlayTime = 0;
+
+            player.x = 100;
+            player.y = canvas.height / 2;
+            player.targetY = canvas.height / 2;
+            
+            resetEnemyPositions();
+            
+            messageBox.classList.remove('won', 'gameover');
+            
+            updateHUD();
+
+            gameState = 'playing';
+            gameLoop();
+        }
+
+        function showMessage(text) {
+            messageBox.innerHTML = text;
+            messageBox.style.display = 'block';
+        }
+
+        messageBox.addEventListener('click', () => {
+            if (gameState === 'ready' || gameState === 'gameover') {
+                messageBox.style.display = 'none';
+                resetGame();
+            }
+        });
+
+        function gameLoop() {
+            if (gameState !== 'playing' && gameState !== 'leveling') {
+                return;
+            }
+            
+            if (gameState === 'playing') {
+                const now = Date.now();
+                totalPlayTime = Math.floor((now - startTime) / 1000);
+                elapsedTime = Math.floor((now - levelStartTime) / 1000);
+                
+                updateHUD();
+
+                movePlayer(); 
+                moveEnemies(); 
+                updateBullets();
+                checkGameOverAndLevelUp(); 
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawStars();
+            drawMoon();
+
+            drawPlayer();
+            allEnemies.forEach(e => drawEnemy(e));
+            drawBullets();
+
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        window.onload = function() {
+            createStars();
+            updateHUD();
+            
+            showMessage(`Night Sky Shooter🌙<div style="font-size: 1.5rem; margin-top: 15px;">Tembak musuh sebanyak ${SCORE_TO_WIN_LEVEL}x untuk naik level!<br>Waktu: ${TIME_LIMIT_PER_LEVEL} detik per level<br><br></div><div class="restart-hint">Klik Untuk Memulai Game</div>`);
+        };
+
+    </script>
+</body>
+</html>
